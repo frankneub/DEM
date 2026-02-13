@@ -1,0 +1,42 @@
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+dist/
+eggs/
+*.egg-info/
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv/
+.env/
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage
+.tox/
+*.coverage
+.pytest_cache/
+
+# IDEs and editors
+.vscode/
+.idea/
+
+# Jupyter
+.ipynb_checkpoints
+
+# macOS
+.DS_Store
+
+# OneDrive temp files
+~$*
