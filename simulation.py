@@ -7,30 +7,63 @@ from numba import jit
 from particle import Particle
 
 
-@jit(nopython=False, cache=True)
-def velocity_integration(velocities, gravity, dt):
-    """JIT-compiled velocity integration."""
-    velocities += gravity * dt
-    return velocities
-
-
-@jit(nopython=False, cache=True)
-def position_integration(positions, velocities, dt):
-    """JIT-compiled position integration."""
-    positions += velocities * dt
-    return positions
-
-
-@jit(nopython=False, cache=True)
-def handle_ground_collision(positions, velocities, floor_y, floor_friction, restitution, radius_array):
-    """JIT-compiled ground collision handling."""
-    for i in range(len(positions)):
-        if positions[i, 1] - radius_array[i] < floor_y:
-            positions[i, 1] = floor_y + radius_array[i]
-            if velocities[i, 1] < 0:
-                velocities[i, 1] = -velocities[i, 1] * restitution
-            velocities[i, 0] *= (1.0 - floor_friction)
-            velocities[i, 2] *= (1.0 - floor_friction)
+@jit(nopython=True, cache=True)
+def resolve_particle_collisions(positions, velocities, masses, radii, 
+                                 restitution, friction, collision_pairs):
+    """JIT-compiled particle collision resolution."""
+    for pair_idx in range(len(collision_pairs)):
+        i, j = int(collision_pairs[pair_idx, 0]), int(collision_pairs[pair_idx, 1])
+        
+        d = positions[j] - positions[i]
+        dist_sq = d[0]*d[0] + d[1]*d[1] + d[2]*d[2]
+        
+        if dist_sq < 1e-24:
+            continue
+        
+        dist = math.sqrt(dist_sq)
+        overlap = radii[i] + radii[j] - dist
+        
+        if overlap <= 0:
+            continue
+        
+        # Normal vector
+        nvec = d / dist
+        
+        # Relative velocity
+        rv = velocities[j] - velocities[i]
+        vn = rv[0]*nvec[0] + rv[1]*nvec[1] + rv[2]*nvec[2]
+        
+        # Compute impulse
+        e = restitution
+        j_impulse = -(1.0 + e) * vn
+        denom = (1.0 / masses[i] + 1.0 / masses[j])
+        
+        if denom == 0:
+            continue
+        
+        j_impulse /= denom
+        
+        # Apply impulse
+        impulse = j_impulse * nvec
+        velocities[i] -= impulse / masses[i]
+        velocities[j] += impulse / masses[j]
+        
+        # Positional correction
+        corr = nvec * (overlap * 0.5 + 1e-5)
+        positions[i] -= corr
+        positions[j] += corr
+        
+        # Tangential friction
+        tangent = rv - vn * nvec
+        tn_sq = tangent[0]*tangent[0] + tangent[1]*tangent[1] + tangent[2]*tangent[2]
+        
+        if tn_sq > 1e-18:
+            tn = math.sqrt(tn_sq)
+            tdir = tangent / tn
+            ft = -friction * j_impulse
+            velocities[i] -= ft * tdir / masses[i]
+            velocities[j] += ft * tdir / masses[j]
+    
     return positions, velocities
 
 
@@ -122,17 +155,13 @@ class DEMSimulation:
         if n == 0:
             return
         
-        # Extract data into arrays for JIT compilation
-        positions = np.array([p.pos for p in self.particles], dtype=np.float64)
-        velocities = np.array([p.vel for p in self.particles], dtype=np.float64)
-        radii = np.array([p.radius for p in self.particles], dtype=np.float64)
-        masses = np.array([p.mass for p in self.particles], dtype=np.float64)
+        # Simple Python operations (fast enough without JIT)
+        # Integrate velocities
+        for p in self.particles:
+            p.vel += self.gravity * dt
         
-        # JIT-compiled velocity integration
-        velocities = velocity_integration(velocities, self.gravity, dt)
-        
-        # Collision resolution: particle-particle (keep non-JIT for now due to complexity)
-        # Use spatial hash (uniform grid) to avoid O(n²) checks
+        # Collision resolution: particle-particle
+        # Build collision pairs using spatial hash
         max_r = max((p.radius for p in self.particles), default=0.05)
         cell_size = max(0.001, max_r * 2.0)
 
@@ -148,87 +177,55 @@ class DEMSimulation:
             key = cell_coords(p.pos)
             grid.setdefault(key, []).append(idx)
 
-        # Neighbor offsets (including current cell)
+        # Neighbor offsets
         neighbor_offsets = [(dx, dy, dz) for dx in (-1, 0, 1)
                                            for dy in (-1, 0, 1)
                                            for dz in (-1, 0, 1)]
 
-        # For each particle, check neighbors in same/adjacent cells
+        # Collect collision pairs
+        collision_pairs = []
         for key, indices in grid.items():
             for i in indices:
-                pi = self.particles[i]
                 for off in neighbor_offsets:
                     nk = (key[0] + off[0], key[1] + off[1], key[2] + off[2])
                     if nk not in grid:
                         continue
                     for j in grid[nk]:
-                        # Ensure each pair is handled once
                         if j <= i:
                             continue
-                        
-                        pj = self.particles[j]
-                        d = pj.pos - pi.pos
-                        dist = np.linalg.norm(d)
-                        
-                        if dist <= 1e-12:
-                            continue
-                        
-                        overlap = pi.radius + pj.radius - dist
-                        if overlap > 0:
-                            # Normal
-                            nvec = d / dist
-                            # Relative velocity
-                            rv = pj.vel - pi.vel
-                            vn = np.dot(rv, nvec)
-                            
-                            # Compute impulse scalar
-                            e = min(self.restitution, self.restitution)
-                            j_impulse = -(1.0 + e) * vn
-                            denom = (1.0 / pi.mass + 1.0 / pj.mass)
-                            if denom == 0:
-                                continue
-                            j_impulse /= denom
-                            
-                            # Apply impulse
-                            impulse = j_impulse * nvec
-                            pi.vel -= impulse / pi.mass
-                            pj.vel += impulse / pj.mass
-                            
-                            # Positional correction to remove sinking
-                            corr = nvec * (overlap * 0.5 + 1e-5)
-                            pi.pos -= corr
-                            pj.pos += corr
-                            
-                            # Tangential friction
-                            tangent = rv - vn * nvec
-                            tn = np.linalg.norm(tangent)
-                            if tn > 1e-9:
-                                tdir = tangent / tn
-                                ft = -self.friction * j_impulse
-                                pi.vel -= ft * tdir / pi.mass
-                                pj.vel += ft * tdir / pj.mass
+                        collision_pairs.append((i, j))
+        
+        # Convert to NumPy array for JIT function
+        if len(collision_pairs) > 0:
+            collision_pairs_array = np.array(collision_pairs, dtype=np.int64)
+            positions = np.array([p.pos for p in self.particles], dtype=np.float64)
+            velocities = np.array([p.vel for p in self.particles], dtype=np.float64)
+            masses = np.array([p.mass for p in self.particles], dtype=np.float64)
+            radii = np.array([p.radius for p in self.particles], dtype=np.float64)
+            
+            # JIT-compiled collision resolution
+            positions, velocities = resolve_particle_collisions(
+                positions, velocities, masses, radii,
+                self.restitution, self.friction, collision_pairs_array
+            )
+            
+            # Update particles with resolved collisions
+            for i, p in enumerate(self.particles):
+                p.pos = positions[i]
+                p.vel = velocities[i]
 
-        # Extract updated velocities back
-        for i, p in enumerate(self.particles):
-            p.vel = velocities[i]
+        # Integrate positions
+        for p in self.particles:
+            p.pos += p.vel * dt
         
-        # JIT-compiled position integration
-        positions = position_integration(positions, velocities, dt)
-        
-        # Update particle positions from array
-        for i, p in enumerate(self.particles):
-            p.pos = positions[i]
-        
-        # JIT-compiled ground collision handling
-        positions, velocities = handle_ground_collision(
-            positions, velocities, self.floor_y, 
-            self.floor_friction, self.restitution, radii
-        )
-        
-        # Update particles with final positions and velocities
-        for i, p in enumerate(self.particles):
-            p.pos = positions[i]
-            p.vel = velocities[i]
+        # Ground collision
+        for p in self.particles:
+            if p.pos[1] - p.radius < self.floor_y:
+                p.pos[1] = self.floor_y + p.radius
+                if p.vel[1] < 0:
+                    p.vel[1] = -p.vel[1] * self.restitution
+                p.vel[0] *= (1.0 - self.floor_friction)
+                p.vel[2] *= (1.0 - self.floor_friction)
 
         # Prune old particles far away
         self.particles = [p for p in self.particles if p.pos[1] > -5 and np.linalg.norm(p.pos) < 200]
