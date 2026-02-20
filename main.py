@@ -443,8 +443,12 @@ class MainWindow(QtWidgets.QMainWindow):
 
         frm = QtWidgets.QFormLayout()
         self.mass_spin = QtWidgets.QDoubleSpinBox()
-        self.mass_spin.setRange(0, 1e7)
-        self.mass_spin.setValue(1000.0)
+        self.mass_spin.setRange(0, 1e12)
+        # initialize from simulation default so UI reflects actual value
+        try:
+            self.mass_spin.setValue(self.gl.simulation.mass_per_hour)
+        except Exception:
+            self.mass_spin.setValue(1000.0)
         self.mass_spin.setSuffix(' kg/h')
         self.mass_spin.valueChanged.connect(self.on_mass_changed)
         frm.addRow('Mass / hour:', self.mass_spin)
