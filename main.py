@@ -51,6 +51,13 @@ class GLWidget(QOpenGLWidget):
         # Visual mapping
         self.vmin = 0.0
         self.vmax = 10.0
+        
+        # Performance tracking
+        self.frame_count = 0
+        self.fps = 0.0
+        self.fps_timer = QtCore.QTimer(self)
+        self.fps_timer.timeout.connect(self._update_fps)
+        self.fps_timer.start(1000)  # Update FPS every 1 second
 
     def initializeGL(self):
         glEnable(GL_DEPTH_TEST)
@@ -86,16 +93,9 @@ class GLWidget(QOpenGLWidget):
             lw.setFixedWidth(desired_w)
             lw.move(self.width() - lw.width() - margin, margin)
             lw.raise_()
-
-        # reposition spawn count label at bottom-left of the GL view
-        if hasattr(self, 'spawn_label') and self.spawn_label is not None:
-            sl = self.spawn_label
-            sl.adjustSize()
-            sm = sl.size()
-            bx = margin
-            by = max(margin, self.height() - sm.height() - margin)
-            sl.move(bx, by)
-            sl.raise_()
+        
+        # reposition labels
+        self.reposition_labels()
 
     def paintGL(self):
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
@@ -151,6 +151,7 @@ class GLWidget(QOpenGLWidget):
         for p in self.simulation.particles:
             c = velocity_to_color(np.linalg.norm(p.vel), self.vmin, max(self.vmax, 1e-6))
             p.color = c
+        self.frame_count += 1
         self.update()
 
     def _spawn_particles(self, dt):
@@ -327,6 +328,22 @@ class GLWidget(QOpenGLWidget):
         self.distance *= (0.95 ** delta)
         self.update()
 
+    def reposition_labels(self):
+        """Reposition all overlay labels vertically at bottom-left."""
+        if hasattr(self, 'time_label') and hasattr(self, 'spawn_label') and hasattr(self, 'ppsec_label') and hasattr(self, 'fps_label'):
+            margin = 12
+            y_pos = self.height() - margin
+            for label in [self.fps_label, self.ppsec_label, self.spawn_label, self.time_label]:
+                label.adjustSize()
+                y_pos -= label.height()
+                label.move(margin, y_pos)
+                y_pos -= 4  # spacing between labels
+
+    def _update_fps(self):
+        """Update FPS counter (called every 1 second)."""
+        self.fps = self.frame_count
+        self.frame_count = 0
+
 class LegendWidget(QtWidgets.QWidget):
     def __init__(self, glwidget, parent=None):
         super().__init__(parent)
@@ -381,6 +398,15 @@ class MainWindow(QtWidgets.QMainWindow):
         # expose to GL widget so it can reposition on resize
         self.gl.legend_widget = self.legend
         self.legend.show()
+
+        # time label (overlay at bottom-left of GL view)
+        self.time_label = QtWidgets.QLabel(self.gl)
+        self.time_label.setStyleSheet('color: rgb(220,220,220); background-color: rgba(60,60,60,200); padding:4px; border-radius:4px;')
+        self.time_label.setText(f"Time: {self.gl.simulation.time}")
+        # expose so GLWidget can reposition on resize
+        self.gl.time_label = self.time_label
+        self.time_label.show()
+
         # spawn count label (overlay at bottom-left of GL view)
         self.spawn_label = QtWidgets.QLabel(self.gl)
         self.spawn_label.setStyleSheet('color: rgb(220,220,220); background-color: rgba(60,60,60,200); padding:4px; border-radius:4px;')
@@ -388,10 +414,30 @@ class MainWindow(QtWidgets.QMainWindow):
         # expose so GLWidget can reposition on resize
         self.gl.spawn_label = self.spawn_label
         self.spawn_label.show()
+
+        # spawn count label (overlay at bottom-left of GL view)
+        self.ppsec_label = QtWidgets.QLabel(self.gl)
+        self.ppsec_label.setStyleSheet('color: rgb(220,220,220); background-color: rgba(60,60,60,200); padding:4px; border-radius:4px;')
+        self.ppsec_label.setText(f"Particles/sec: {self.gl.simulation.ppsec}")
+        # expose so GLWidget can reposition on resize
+        self.gl.ppsec_label = self.ppsec_label
+        self.ppsec_label.show()
+
+        # FPS label (overlay at bottom-left of GL view)
+        self.fps_label = QtWidgets.QLabel(self.gl)
+        self.fps_label.setStyleSheet('color: rgb(220,220,220); background-color: rgba(60,60,60,200); padding:4px; border-radius:4px;')
+        self.fps_label.setText(f"FPS: {self.gl.fps:.0f}")
+        # expose so GLWidget can reposition on resize
+        self.gl.fps_label = self.fps_label
+        self.fps_label.show()
         # ensure legend repaints each GL frame so vmax/vmin updates are visible
         try:
             self.gl.timer.timeout.connect(self.legend.update)
+            self.gl.timer.timeout.connect(self._update_time_label)
             self.gl.timer.timeout.connect(self._update_spawn_label)
+            self.gl.timer.timeout.connect(self._update_ppsec_label)
+            self.gl.timer.timeout.connect(self._update_fps_label)
+            
         except Exception:
             pass
 
@@ -474,10 +520,35 @@ class MainWindow(QtWidgets.QMainWindow):
         self.gl.start()
         self.status.setText('Running')
 
+    def _update_time_label(self):
+        try:
+            self.time_label.setText(f"Time: {self.gl.simulation.time:.2f}s")
+            self.time_label.adjustSize()
+            self.gl.reposition_labels()
+        except Exception:
+            pass
+
     def _update_spawn_label(self):
         try:
             self.spawn_label.setText(f"Spawned: {self.gl.simulation.spawned_count}")
             self.spawn_label.adjustSize()
+            self.gl.reposition_labels()
+        except Exception:
+            pass
+
+    def _update_ppsec_label(self):
+        try:
+            self.ppsec_label.setText(f"Particles/sec: {self.gl.simulation.ppsec:.2f}")
+            self.ppsec_label.adjustSize()
+            self.gl.reposition_labels()
+        except Exception:
+            pass
+
+    def _update_fps_label(self):
+        try:
+            self.fps_label.setText(f"FPS: {self.gl.fps:.0f}")
+            self.fps_label.adjustSize()
+            self.gl.reposition_labels()
         except Exception:
             pass
 

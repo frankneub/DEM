@@ -27,6 +27,8 @@ class DEMSimulation:
         self.spawn_queue = deque()
         self.last_spawn_time = time.time()
         self.spawned_count = 0
+        self.ppsec = 0
+        self.time = 0
 
     def step(self, dt):
         """Execute one simulation step."""
@@ -38,6 +40,8 @@ class DEMSimulation:
         # Simple model: choose spheres with random radius and density
         mass_per_sec = self.mass_per_hour / 3600.0
         mass_to_emit = mass_per_sec * dt
+        self.time += dt
+        self.ppsec = self.spawned_count / max(self.time, 1e-6)
         # Keep a leftover buffer in queue
         self.spawn_queue.append(mass_to_emit)
         total = sum(self.spawn_queue)
@@ -94,7 +98,7 @@ class DEMSimulation:
         for p in self.particles:
             p.vel += self.gravity * dt
             # Apply per-particle rolling resistance as rotational damping
-            p.angular_vel *= (1.0 - p.rolling_resistance * dt)
+            # p.angular_vel *= (1.0 - p.rolling_resistance * dt)
         
         # Collision resolution: particle-particle
         # Use spatial hash (uniform grid) to avoid O(n²) checks
