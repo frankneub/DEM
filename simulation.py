@@ -90,6 +90,12 @@ class DEMSimulation:
         self.spawned_count = 0
         self.ppsec = 0
         self.time = 0
+        # Particle size distribution defaults
+        self.min_radius = 0.02
+        self.max_radius = 0.08
+        self.radius_mean = 0.05
+        self.radius_std = 0.01
+        self.radius_distribution = 'Uniform'  # 'Uniform' or 'Normal'
 
     def step(self, dt):
         """Execute one simulation step."""
@@ -109,8 +115,13 @@ class DEMSimulation:
         
         # Spawn while enough mass for one typical particle
         while total > 0:
-            # Choose a radius (0.02-0.08 m)
-            r = random.uniform(0.02, 0.08)
+            # Choose a radius according to configured distribution
+            if getattr(self, 'radius_distribution', 'Uniform') == 'Normal':
+                r = random.gauss(self.radius_mean, self.radius_std)
+            else:
+                r = random.uniform(self.min_radius, self.max_radius)
+            # clamp and enforce small positive radius
+            r = max(0.001, min(r, getattr(self, 'max_radius', 0.08)))
             density = 2500.0
             m = (4.0 / 3.0) * math.pi * r**3 * density
             

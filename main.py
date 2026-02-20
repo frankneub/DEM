@@ -477,6 +477,45 @@ class MainWindow(QtWidgets.QMainWindow):
         self.rolling_resistance_spin.valueChanged.connect(self.on_rolling_resistance)
         frm.addRow('Rolling resistance:', self.rolling_resistance_spin)
 
+        # Particle size distribution controls
+        self.dist_combo = QtWidgets.QComboBox()
+        self.dist_combo.addItems(['Uniform', 'Normal'])
+        self.dist_combo.setCurrentText('Uniform')
+        self.dist_combo.currentTextChanged.connect(self.on_radius_distribution)
+        frm.addRow('Radius distribution:', self.dist_combo)
+
+        self.min_radius_spin = QtWidgets.QDoubleSpinBox()
+        self.min_radius_spin.setRange(0.001, 1.0)
+        self.min_radius_spin.setSingleStep(0.005)
+        self.min_radius_spin.setValue(self.gl.simulation.min_radius)
+        self.min_radius_spin.setSuffix(' m')
+        self.min_radius_spin.valueChanged.connect(self.on_min_radius)
+        frm.addRow('Min radius:', self.min_radius_spin)
+
+        self.max_radius_spin = QtWidgets.QDoubleSpinBox()
+        self.max_radius_spin.setRange(0.001, 1.0)
+        self.max_radius_spin.setSingleStep(0.005)
+        self.max_radius_spin.setValue(self.gl.simulation.max_radius)
+        self.max_radius_spin.setSuffix(' m')
+        self.max_radius_spin.valueChanged.connect(self.on_max_radius)
+        frm.addRow('Max radius:', self.max_radius_spin)
+
+        self.mean_radius_spin = QtWidgets.QDoubleSpinBox()
+        self.mean_radius_spin.setRange(0.001, 1.0)
+        self.mean_radius_spin.setSingleStep(0.005)
+        self.mean_radius_spin.setValue(self.gl.simulation.radius_mean)
+        self.mean_radius_spin.setSuffix(' m')
+        self.mean_radius_spin.valueChanged.connect(self.on_mean_radius)
+        frm.addRow('Mean radius (normal):', self.mean_radius_spin)
+
+        self.std_radius_spin = QtWidgets.QDoubleSpinBox()
+        self.std_radius_spin.setRange(0.0, 1.0)
+        self.std_radius_spin.setSingleStep(0.005)
+        self.std_radius_spin.setValue(self.gl.simulation.radius_std)
+        self.std_radius_spin.setSuffix(' m')
+        self.std_radius_spin.valueChanged.connect(self.on_std_radius)
+        frm.addRow('Std dev (normal):', self.std_radius_spin)
+
         right.addLayout(frm)
 
         btns = QtWidgets.QHBoxLayout()
@@ -519,6 +558,36 @@ class MainWindow(QtWidgets.QMainWindow):
     def on_start(self):
         self.gl.start()
         self.status.setText('Running')
+
+    def on_radius_distribution(self, text):
+        try:
+            self.gl.simulation.radius_distribution = text
+        except Exception:
+            pass
+
+    def on_min_radius(self, v):
+        try:
+            self.gl.simulation.min_radius = v
+        except Exception:
+            pass
+
+    def on_max_radius(self, v):
+        try:
+            self.gl.simulation.max_radius = v
+        except Exception:
+            pass
+
+    def on_mean_radius(self, v):
+        try:
+            self.gl.simulation.radius_mean = v
+        except Exception:
+            pass
+
+    def on_std_radius(self, v):
+        try:
+            self.gl.simulation.radius_std = v
+        except Exception:
+            pass
 
     def _update_time_label(self):
         try:
