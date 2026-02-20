@@ -74,15 +74,15 @@ class DEMSimulation:
         # Physics parameters
         self.particles = []
         self.gravity = np.array([0.0, -9.81, 0.0])
-        self.restitution = 0.3
-        self.friction = 0.3
-        self.floor_friction = 0.3
-        self.rolling_resistance = 0.05
+        self.restitution = 0.2
+        self.friction = 0.6
+        self.floor_friction = 0.6
+        self.rolling_resistance = 0.35
         self.floor_y = 0.0
         self.time_step = 1.0 / 120.0
 
         # Injector / spawning
-        self.mass_per_hour = 1000.0
+        self.mass_per_hour = 1000000.0
         self.spawn_region = ((-0.2, 0, -0.2), (0.2, 0, 0.2))
         self.spawn_height = 2.0
         self.spawn_queue = deque()
@@ -101,6 +101,17 @@ class DEMSimulation:
         """Execute one simulation step."""
         self._spawn_particles(dt)
         self._integrate(dt)
+
+    def clear(self):
+        """Reset the simulation to an initial empty state."""
+        try:
+            self.particles.clear()
+        except Exception:
+            self.particles = []
+        self.spawn_queue.clear()
+        self.spawned_count = 0
+        self.time = 0
+        self.ppsec = 0
 
     def _spawn_particles(self, dt):
         """Spawn particles based on mass_per_hour rate."""

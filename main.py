@@ -525,6 +525,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.stop_btn = QtWidgets.QPushButton('Stop')
         self.stop_btn.clicked.connect(self.on_stop)
         btns.addWidget(self.stop_btn)
+        self.clear_btn = QtWidgets.QPushButton('Clear')
+        self.clear_btn.clicked.connect(self.on_clear)
+        btns.addWidget(self.clear_btn)
         right.addLayout(btns)
 
         spacer = QtWidgets.QSpacerItem(20, 20, QtWidgets.QSizePolicy.Minimum, QtWidgets.QSizePolicy.Expanding)
@@ -558,6 +561,37 @@ class MainWindow(QtWidgets.QMainWindow):
     def on_start(self):
         self.gl.start()
         self.status.setText('Running')
+
+    def on_clear(self):
+        try:
+            # stop simulation and clear particles
+            self.gl.stop()
+            if hasattr(self.gl, 'simulation'):
+                try:
+                    self.gl.simulation.clear()
+                except Exception:
+                    # fallback: clear lists and reset counters
+                    self.gl.simulation.particles = []
+                    self.gl.simulation.spawned_count = 0
+                    self.gl.simulation.time = 0
+                    self.gl.simulation.ppsec = 0
+                    self.gl.simulation.spawn_queue.clear()
+            # update overlays and status
+            self._update_spawn_label()
+            self._update_time_label()
+            self._update_ppsec_label()
+            if hasattr(self.gl, 'fps'):
+                try:
+                    self.gl.fps = 0
+                    if hasattr(self, 'fps_label'):
+                        self.fps_label.setText(f"FPS: {self.gl.fps:.0f}")
+                        self.fps_label.adjustSize()
+                except Exception:
+                    pass
+            self.gl.reposition_labels()
+            self.status.setText('Cleared')
+        except Exception:
+            pass
 
     def on_radius_distribution(self, text):
         try:
