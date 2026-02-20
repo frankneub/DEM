@@ -3,7 +3,35 @@ import time
 import random
 from collections import deque
 import numpy as np
+from numba import jit
 from particle import Particle
+
+
+@jit(nopython=False, cache=True)
+def velocity_integration(velocities, gravity, dt):
+    """JIT-compiled velocity integration."""
+    velocities += gravity * dt
+    return velocities
+
+
+@jit(nopython=False, cache=True)
+def position_integration(positions, velocities, dt):
+    """JIT-compiled position integration."""
+    positions += velocities * dt
+    return positions
+
+
+@jit(nopython=False, cache=True)
+def handle_ground_collision(positions, velocities, floor_y, floor_friction, restitution, radius_array):
+    """JIT-compiled ground collision handling."""
+    for i in range(len(positions)):
+        if positions[i, 1] - radius_array[i] < floor_y:
+            positions[i, 1] = floor_y + radius_array[i]
+            if velocities[i, 1] < 0:
+                velocities[i, 1] = -velocities[i, 1] * restitution
+            velocities[i, 0] *= (1.0 - floor_friction)
+            velocities[i, 2] *= (1.0 - floor_friction)
+    return positions, velocities
 
 
 class DEMSimulation:
@@ -94,13 +122,16 @@ class DEMSimulation:
         if n == 0:
             return
         
-        # Integrate velocities
-        for p in self.particles:
-            p.vel += self.gravity * dt
-            # Apply per-particle rolling resistance as rotational damping
-            # p.angular_vel *= (1.0 - p.rolling_resistance * dt)
+        # Extract data into arrays for JIT compilation
+        positions = np.array([p.pos for p in self.particles], dtype=np.float64)
+        velocities = np.array([p.vel for p in self.particles], dtype=np.float64)
+        radii = np.array([p.radius for p in self.particles], dtype=np.float64)
+        masses = np.array([p.mass for p in self.particles], dtype=np.float64)
         
-        # Collision resolution: particle-particle
+        # JIT-compiled velocity integration
+        velocities = velocity_integration(velocities, self.gravity, dt)
+        
+        # Collision resolution: particle-particle (keep non-JIT for now due to complexity)
         # Use spatial hash (uniform grid) to avoid O(n²) checks
         max_r = max((p.radius for p in self.particles), default=0.05)
         cell_size = max(0.001, max_r * 2.0)
@@ -177,19 +208,27 @@ class DEMSimulation:
                                 pi.vel -= ft * tdir / pi.mass
                                 pj.vel += ft * tdir / pj.mass
 
-        # Integrate positions and handle ground collisions
-        for p in self.particles:
-            p.pos += p.vel * dt
-            
-            # Ground collision
-            if p.pos[1] - p.radius < self.floor_y:
-                # Push above ground
-                p.pos[1] = self.floor_y + p.radius
-                if p.vel[1] < 0:
-                    p.vel[1] = -p.vel[1] * self.restitution
-                # Approximate friction with ground (tangential damping)
-                p.vel[0] *= (1.0 - self.floor_friction)
-                p.vel[2] *= (1.0 - self.floor_friction)
+        # Extract updated velocities back
+        for i, p in enumerate(self.particles):
+            p.vel = velocities[i]
+        
+        # JIT-compiled position integration
+        positions = position_integration(positions, velocities, dt)
+        
+        # Update particle positions from array
+        for i, p in enumerate(self.particles):
+            p.pos = positions[i]
+        
+        # JIT-compiled ground collision handling
+        positions, velocities = handle_ground_collision(
+            positions, velocities, self.floor_y, 
+            self.floor_friction, self.restitution, radii
+        )
+        
+        # Update particles with final positions and velocities
+        for i, p in enumerate(self.particles):
+            p.pos = positions[i]
+            p.vel = velocities[i]
 
         # Prune old particles far away
         self.particles = [p for p in self.particles if p.pos[1] > -5 and np.linalg.norm(p.pos) < 200]
